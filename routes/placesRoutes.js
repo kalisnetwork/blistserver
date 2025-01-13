@@ -1,10 +1,11 @@
-// src/routes/placesRoutes.js
 import express from 'express';
 import placesController from '../controllers/placesController.js';
 
 const router = express.Router();
 
-router.get('/search', placesController.textSearch);
-router.get('/nearby', placesController.nearbySearch);
+router.get('/search', placesController.advancedSearch);
+router.get('/search/services', placesController.searchByServices);
+router.get('/search/rating', placesController.searchByRating);
+router.get('/search/nearby', placesController.searchNearby);
 
 export default router;

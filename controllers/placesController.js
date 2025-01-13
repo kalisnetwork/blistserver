@@ -1,161 +1,225 @@
+// src/controllers/placesController.js
 import { googleMapsApiKey } from '../config.js';
-import { fetchBusinesses, applyFilters, applySorting } from '../utils/apiUtils.js';
+import { fetchBusinesses, applyFilters, applySorting, getLatLongFromPostalCode, getLatLongFromArea } from '../utils/apiUtils.js';
+import { categoryToGooglePlacesMapping } from '../utils/categoryMapping.js';
+import { SEARCH_TYPES, SORT_OPTIONS } from '../utils/searchUtils.js';
 
-// Function to get latitude and longitude from a postal code
-const getLatLongFromPostalCode = async (postalCode) => {
-  const geocodeUrl = `https://maps.googleapis.com/maps/api/geocode/json?address=${postalCode}&key=${googleMapsApiKey}`;
+// Helper function to calculate distance between two coordinates
+const calculateDistance = (lat1, lon1, lat2, lon2) => {
+  const R = 6371; // Earth's radius in km
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+};
+
+// Helper function to build an advanced search query
+const buildAdvancedSearchQuery = (params) => {
+  const {
+    businessName,
+    area,
+    postalCode,
+    query,
+    category,
+    minPrice,
+    maxPrice,
+    minRating,
+    openNow,
+    services,
+    keywords
+  } = params;
+
+  let searchQuery = [];
+  let searchParams = new URLSearchParams();
+
+  if (category && categoryToGooglePlacesMapping[category]) {
+    searchQuery.push(categoryToGooglePlacesMapping[category].keywords);
+    searchParams.append('type', categoryToGooglePlacesMapping[category].type);
+  }
+
+  if (businessName) searchQuery.push(businessName);
+  if (area) searchQuery.push(area);
+  if (postalCode) searchQuery.push(`postal code ${postalCode}`);
+  if (query) searchQuery.push(query);
+  if (keywords) searchQuery.push(keywords);
+
+  if (openNow) searchParams.append('opennow', 'true');
+  if (minPrice) searchParams.append('minprice', minPrice);
+  if (maxPrice) searchParams.append('maxprice', maxPrice);
+  if (services) searchParams.append('keyword', services);
+
+  return {
+    queryString: searchQuery.join(' ').trim(),
+    parameters: searchParams.toString()
+  };
+};
+
+// Advanced search function
+const advancedSearch = async (req, res) => {
   try {
-    const response = await fetch(geocodeUrl);
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
-    const data = await response.json();
-    if (data.status === 'OK' && data.results.length > 0) {
-      const location = data.results[0].geometry.location;
-      return { latitude: location.lat, longitude: location.lng };
+    const {
+      latitude,
+      longitude,
+      radius = 5000,
+      minRating = 0,
+      businessStatus,
+      sortBy = SORT_OPTIONS.RELEVANCE,
+      ascending = 'true',
+      limit,
+      offset = 0,
+      includeDetails = 'false',
+      ...otherParams
+    } = req.query;
+
+    let coordinates = null;
+
+    // Get coordinates from area/postal code if not provided directly
+    if (!latitude || !longitude) {
+      if (otherParams.area) {
+        coordinates = await getLatLongFromArea(otherParams.area);
+      } else if (otherParams.postalCode) {
+        coordinates = await getLatLongFromPostalCode(otherParams.postalCode);
+      }
     } else {
-      throw new Error(`Geocode API error! status: ${data.status}`);
+      coordinates = { latitude, longitude };
     }
-  } catch (error) {
-    console.error('Error fetching geocode data:', error);
-    throw new Error('Failed to fetch geocode data');
-  }
-};
 
-// Function to get latitude and longitude from an area
-const getLatLongFromArea = async (area) => {
-  const geocodeUrl = `https://maps.googleapis.com/maps/api/geocode/json?address=${area}&key=${googleMapsApiKey}`;
-  try {
-    const response = await fetch(geocodeUrl);
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
-    const data = await response.json();
-    if (data.status === 'OK' && data.results.length > 0) {
-      const location = data.results[0].geometry.location;
-      return { latitude: location.lat, longitude: location.lng };
+    // Build search query
+    const { queryString, parameters } = buildAdvancedSearchQuery(otherParams);
+
+    // Construct base URL
+    let baseUrl;
+    if (queryString) {
+      baseUrl = `https://maps.googleapis.com/maps/api/place/textsearch/json?query=${encodeURIComponent(queryString)}`;
     } else {
-      throw new Error(`Geocode API error! status: ${data.status}`);
+      baseUrl = 'https://maps.googleapis.com/maps/api/place/nearbysearch/json?';
     }
+
+    // Add coordinates and radius if available
+    if (coordinates) {
+      baseUrl += `&location=${coordinates.latitude},${coordinates.longitude}&radius=${radius}`;
+    }
+
+    // Add additional parameters
+    if (parameters) {
+      baseUrl += `&${parameters}`;
+    }
+
+    // Add API key
+    baseUrl += `&key=${googleMapsApiKey}`;
+
+    // Fetch results
+    let businesses = await fetchBusinesses(baseUrl);
+
+    // Handle zero results
+    if (businesses.length === 0) {
+      return res.json({
+        results: [],
+        total: 0,
+        message: "No businesses found matching the search criteria.",
+      });
+    }
+
+    // Apply post-fetch filters
+    if (minRating > 0) {
+      businesses = businesses.filter(business => (business.rating || 0) >= minRating);
+    }
+
+    if (businessStatus) {
+      businesses = businesses.filter(business => business.businessStatus === businessStatus);
+    }
+
+    // Add distance calculation if coordinates are available
+    if (coordinates) {
+      businesses = businesses.map(business => ({
+        ...business,
+        distance: calculateDistance(
+          coordinates.latitude,
+          coordinates.longitude,
+          business.geometry?.location?.lat,
+          business.geometry?.location?.lng
+        )
+      }));
+    }
+
+    // Apply sorting
+    switch (sortBy) {
+      case SORT_OPTIONS.DISTANCE:
+        businesses.sort((a, b) => ascending === 'true' ?
+          (a.distance - b.distance) : (b.distance - a.distance));
+        break;
+      case SORT_OPTIONS.RATING:
+        businesses.sort((a, b) => ascending === 'true' ?
+          ((a.rating || 0) - (b.rating || 0)) : ((b.rating || 0) - (a.rating || 0)));
+        break;
+      case SORT_OPTIONS.PRICE:
+        businesses.sort((a, b) => ascending === 'true' ?
+          ((a.priceLevel || 0) - (b.priceLevel || 0)) : ((b.priceLevel || 0) - (a.priceLevel || 0)));
+        break;
+      case SORT_OPTIONS.NAME:
+        businesses.sort((a, b) => ascending === 'true' ?
+          a.businessName.localeCompare(b.businessName) : b.businessName.localeCompare(a.businessName));
+        break;
+      // Add more sorting options as needed
+    }
+
+    // Apply pagination
+    if (limit) {
+      businesses = businesses.slice(offset, offset + parseInt(limit));
+    }
+
+    // Format response
+    const response = {
+      results: businesses,
+      total: businesses.length,
+      offset: parseInt(offset),
+      limit: limit ? parseInt(limit) : null,
+      hasMore: limit ? businesses.length >= parseInt(limit) : false
+    };
+
+    res.json(response);
   } catch (error) {
-    console.error('Error fetching geocode data:', error);
-    throw new Error('Failed to fetch geocode data');
+    console.error('Error in advanced search:', error);
+    res.status(500).json({ error: 'Failed to fetch search results' });
   }
 };
 
-const fetchAndFilterBusinesses = async (queryUrl, postalCode, area, businessName, query) => {
-  console.log(`Query URL: ${queryUrl}`);
-  let businesses = await fetchBusinesses(queryUrl, query);
-  console.log(`Fetched businesses: ${JSON.stringify(businesses)}`);
-  
-  if (postalCode || area || businessName) {
-    businesses = businesses.filter(business => {
-      const matchesPostalCode = postalCode ? business.postalCode === postalCode : true;
-      const matchesArea = area ? business.completeAddress?.toLowerCase().includes(area.toLowerCase()) : true;
-      const matchesBusinessName = businessName ? business.businessName?.toLowerCase().includes(businessName.toLowerCase()) : true;
-      
-      console.log(`Business: ${business.businessName}, Matches Postal Code: ${matchesPostalCode}, Matches Area: ${matchesArea}, Matches Business Name: ${matchesBusinessName}`);
-      return matchesPostalCode && matchesArea && matchesBusinessName;
-    });
-  }
-  return businesses;
+// Search by services
+const searchByServices = async (req, res) => {
+  const { services, ...otherParams } = req.query;
+  req.query = { ...otherParams, keywords: services };
+  return advancedSearch(req, res);
 };
 
-const textSearch = async (req, res) => {
-  const { businessName, area, postalCode, filter, sort, ascending, query } = req.query;
-  try {
-    let searchQuery = [];
-    let latitude, longitude;
-    let businesses = [];
-
-    if ((area || postalCode) && !businessName && !query) {
-      if (area) {
-        const coordinates = await getLatLongFromArea(area);
-        latitude = coordinates.latitude;
-        longitude = coordinates.longitude;
-        console.log(`Coordinates for area: ${latitude}, ${longitude}`);
-      } else if (postalCode) {
-        const coordinates = await getLatLongFromPostalCode(postalCode);
-        latitude = coordinates.latitude;
-        longitude = coordinates.longitude;
-        console.log(`Coordinates for postal code: ${latitude}, ${longitude}`);
-      }
-      let queryUrl = `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${latitude},${longitude}&radius=1000&type=business&key=${googleMapsApiKey}`;
-      businesses = await fetchBusinesses(queryUrl, query);
-    } else {
-      if (postalCode) {
-        const coordinates = await getLatLongFromPostalCode(postalCode);
-        latitude = coordinates.latitude;
-        longitude = coordinates.longitude;
-        console.log(`Coordinates for postal code: ${latitude}, ${longitude}`);
-        searchQuery.push(`postal code ${postalCode}`);
-      }
-      if (businessName) {
-        searchQuery.push(businessName);
-      }
-      if (area) {
-        const coordinates = await getLatLongFromArea(area);
-        latitude = coordinates.latitude;
-        longitude = coordinates.longitude;
-        console.log(`Coordinates for area: ${latitude}, ${longitude}`);
-        searchQuery.push(area);
-      }
-      if (query) {
-        searchQuery.push(query);
-      }
-
-      if (searchQuery.length === 0) {
-        return res.status(400).json({ error: 'Missing search parameters' });
-      }
-
-      searchQuery = searchQuery.join(' ');
-      console.log(`Search query: ${searchQuery}`);
-      let queryUrl = `https://maps.googleapis.com/maps/api/place/textsearch/json?query=${searchQuery}&key=${googleMapsApiKey}`;
-      if (latitude && longitude) {
-        queryUrl += `&location=${latitude},${longitude}&radius=1000`;
-      }
-      businesses = await fetchAndFilterBusinesses(queryUrl, postalCode, area, businessName, query);
-    }
-
-    if (filter) {
-      businesses = applyFilters(businesses, filter);
-    }
-    if (sort) {
-      businesses = applySorting(businesses, sort, ascending === 'true');
-    }
-
-    res.json(businesses);
-  } catch (error) {
-    console.error('Error fetching text search results:', error);
-    res.status(500).json({ error: 'Failed to fetch text search results' });
-  }
+// Search by rating
+const searchByRating = async (req, res) => {
+  const { minRating, ...otherParams } = req.query;
+  req.query = { ...otherParams, minRating, sortBy: SORT_OPTIONS.RATING };
+  return advancedSearch(req, res);
 };
 
-const nearbySearch = async (req, res) => {
-  const { latitude, longitude, radius, filter, sort, ascending, query } = req.query;
-  if (!latitude || !longitude || !radius) {
-    return res.status(400).json({ error: 'Missing parameters' });
+// Search nearby
+const searchNearby = async (req, res) => {
+  const { latitude, longitude, radius, category, ...otherParams } = req.query;
+  if (!latitude || !longitude) {
+    return res.status(400).json({ error: 'Coordinates are required for nearby search' });
   }
 
-  try {
-    let businesses = await fetchBusinesses(
-      `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${latitude},${longitude}&radius=${radius}&type=business&key=${googleMapsApiKey}`,
-      query
-    );
-    if (filter) {
-      businesses = applyFilters(businesses, filter);
-    }
-    if (sort) {
-      businesses = applySorting(businesses, sort, ascending === 'true');
-    }
-    res.json(businesses);
-  } catch (error) {
-    console.error('Error fetching nearby search results:', error);
-    res.status(500).json({ error: 'Failed to fetch nearby search results' });
+  // Map category to Google Places type
+  if (category && categoryToGooglePlacesMapping[category]) {
+    otherParams.type = categoryToGooglePlacesMapping[category].type;
   }
+
+  req.query = { latitude, longitude, radius, ...otherParams };
+  return advancedSearch(req, res);
 };
 
 export default {
-  textSearch,
-  nearbySearch
+  advancedSearch,
+  searchByServices,
+  searchByRating,
+  searchNearby
 };
