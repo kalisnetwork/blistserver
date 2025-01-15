@@ -1,6 +1,4 @@
-// Add this mapping at the top of placesController.js
 export const categoryToGooglePlacesMapping = {
-    // Previous categories
     'AC Service': { type: 'establishment', keywords: 'air conditioning service repair' },
     'Astrologers': { type: 'establishment', keywords: 'astrologer fortune teller' },
     'Body Massage Centers': { type: 'spa', keywords: 'massage wellness' },

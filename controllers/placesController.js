@@ -1,8 +1,9 @@
-// src/controllers/placesController.js
 import { googleMapsApiKey } from '../config.js';
 import { fetchBusinesses, applyFilters, applySorting, getLatLongFromPostalCode, getLatLongFromArea } from '../utils/apiUtils.js';
 import { categoryToGooglePlacesMapping } from '../utils/categoryMapping.js';
 import { SEARCH_TYPES, SORT_OPTIONS } from '../utils/searchUtils.js';
+import { db } from '../utils/firebase.js';
+import { collection, getDocs } from 'firebase/firestore';
 
 // Helper function to calculate distance between two coordinates
 const calculateDistance = (lat1, lon1, lat2, lon2) => {
@@ -57,7 +58,6 @@ const buildAdvancedSearchQuery = (params) => {
   };
 };
 
-// Advanced search function
 const advancedSearch = async (req, res) => {
   try {
     const {
@@ -71,6 +71,7 @@ const advancedSearch = async (req, res) => {
       limit,
       offset = 0,
       includeDetails = 'false',
+      query,
       ...otherParams
     } = req.query;
 
@@ -87,8 +88,13 @@ const advancedSearch = async (req, res) => {
       coordinates = { latitude, longitude };
     }
 
+    // Ensure the query is provided
+    if (!query) {
+      return res.status(400).json({ error: 'Query parameter is required for search' });
+    }
+
     // Build search query
-    const { queryString, parameters } = buildAdvancedSearchQuery(otherParams);
+    const { queryString, parameters } = buildAdvancedSearchQuery({ ...otherParams, query });
 
     // Construct base URL
     let baseUrl;
@@ -111,8 +117,30 @@ const advancedSearch = async (req, res) => {
     // Add API key
     baseUrl += `&key=${googleMapsApiKey}`;
 
-    // Fetch results
-    let businesses = await fetchBusinesses(baseUrl);
+    // Fetch results from Firestore
+    const querySnapshot = await getDocs(collection(db, 'businessListings'));
+    const firebaseBusinesses = [];
+    querySnapshot.forEach((doc) => {
+      firebaseBusinesses.push({ id: doc.id, ...doc.data(), source: 'Firebase' });
+    });
+
+    // Filter Firebase results based on the provided query
+    const filteredFirebaseBusinesses = firebaseBusinesses.filter(business => 
+      business.businessName.toLowerCase().includes(query.toLowerCase()) ||
+      business.mainCategory.toLowerCase().includes(query.toLowerCase()) ||
+      business.subCategory.toLowerCase().includes(query.toLowerCase()) ||
+      business.availableServices.toLowerCase().includes(query.toLowerCase())
+    );
+
+    // Fetch results from Google Maps API
+    let googleBusinesses = await fetchBusinesses(baseUrl);
+    googleBusinesses = googleBusinesses.map(business => ({
+      ...business,
+      source: 'Google Maps'
+    }));
+
+    // Combine results, prioritize Firebase first
+    let businesses = [...filteredFirebaseBusinesses, ...googleBusinesses];
 
     // Handle zero results
     if (businesses.length === 0) {
@@ -217,9 +245,25 @@ const searchNearby = async (req, res) => {
   return advancedSearch(req, res);
 };
 
+// Fetch business listings from Firestore
+export const getBusinessListings = async (req, res) => {
+  try {
+    const querySnapshot = await getDocs(collection(db, 'businessListings'));
+    const listings = [];
+    querySnapshot.forEach((doc) => {
+      listings.push({ id: doc.id, ...doc.data() });
+    });
+    res.json(listings);
+  } catch (error) {
+    console.error('Error fetching business listings:', error);
+    res.status(500).json({ error: 'Failed to fetch business listings' });
+  }
+};
+
 export default {
   advancedSearch,
   searchByServices,
   searchByRating,
-  searchNearby
+  searchNearby,
+  getBusinessListings
 };
