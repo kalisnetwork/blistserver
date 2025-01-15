@@ -72,6 +72,7 @@ const advancedSearch = async (req, res) => {
       offset = 0,
       includeDetails = 'false',
       query,
+      category,
       ...otherParams
     } = req.query;
 
@@ -88,13 +89,16 @@ const advancedSearch = async (req, res) => {
       coordinates = { latitude, longitude };
     }
 
-    // Ensure the query is provided
-    if (!query) {
-      return res.status(400).json({ error: 'Query parameter is required for search' });
+    // Ensure either query or category is provided
+    if (!query && !category) {
+      return res.status(400).json({ error: 'Query or category parameter is required for search' });
     }
 
+    // Use category as query if query is not provided
+    const searchQuery = query || category;
+
     // Build search query
-    const { queryString, parameters } = buildAdvancedSearchQuery({ ...otherParams, query });
+    const { queryString, parameters } = buildAdvancedSearchQuery({ ...otherParams, query: searchQuery });
 
     // Construct base URL
     let baseUrl;
@@ -117,6 +121,13 @@ const advancedSearch = async (req, res) => {
     // Add API key
     baseUrl += `&key=${googleMapsApiKey}`;
 
+    // Fetch results from Google Maps API
+    let googleBusinesses = await fetchBusinesses(baseUrl);
+    googleBusinesses = googleBusinesses.map(business => ({
+      ...business,
+      source: 'Google Maps'
+    }));
+
     // Fetch results from Firestore
     const querySnapshot = await getDocs(collection(db, 'businessListings'));
     const firebaseBusinesses = [];
@@ -124,20 +135,13 @@ const advancedSearch = async (req, res) => {
       firebaseBusinesses.push({ id: doc.id, ...doc.data(), source: 'Firebase' });
     });
 
-    // Filter Firebase results based on the provided query
+    // Filter Firebase results based on the provided query or category
     const filteredFirebaseBusinesses = firebaseBusinesses.filter(business => 
-      business.businessName.toLowerCase().includes(query.toLowerCase()) ||
-      business.mainCategory.toLowerCase().includes(query.toLowerCase()) ||
-      business.subCategory.toLowerCase().includes(query.toLowerCase()) ||
-      business.availableServices.toLowerCase().includes(query.toLowerCase())
+      business.businessName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      business.mainCategory.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      business.subCategory.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      business.availableServices.toLowerCase().includes(searchQuery.toLowerCase())
     );
-
-    // Fetch results from Google Maps API
-    let googleBusinesses = await fetchBusinesses(baseUrl);
-    googleBusinesses = googleBusinesses.map(business => ({
-      ...business,
-      source: 'Google Maps'
-    }));
 
     // Combine results, prioritize Firebase first
     let businesses = [...filteredFirebaseBusinesses, ...googleBusinesses];
@@ -214,6 +218,7 @@ const advancedSearch = async (req, res) => {
     res.status(500).json({ error: 'Failed to fetch search results' });
   }
 };
+
 
 // Search by services
 const searchByServices = async (req, res) => {
