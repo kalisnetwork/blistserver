@@ -2,7 +2,7 @@
   "name": "business-api",
   "version": "1.0.0",
   "description": "API for fetching business listings",
-  "main": "src/index.mjs",
+  "main": "index.js",
   "scripts": {
     "start": "node index.js",
     "dev": "nodemon index.js"
