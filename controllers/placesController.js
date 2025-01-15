@@ -246,7 +246,8 @@ const searchNearby = async (req, res) => {
     otherParams.type = categoryToGooglePlacesMapping[category].type;
   }
 
-  req.query = { latitude, longitude, radius, ...otherParams };
+  //Include category as query parameter to satisfy advancedSearch condition
+  req.query = { latitude, longitude, radius, ...otherParams, query:category };
   return advancedSearch(req, res);
 };
 
