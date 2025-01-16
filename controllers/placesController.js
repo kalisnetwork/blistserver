@@ -89,10 +89,10 @@ const advancedSearch = async (req, res) => {
       coordinates = { latitude, longitude };
     }
 
-    // Ensure either query or category is provided
-    if (!query && !category) {
-      return res.status(400).json({ error: 'Query or category parameter is required for search' });
-    }
+      // Ensure either query or category is provided
+    //   if (!query && !category) {
+    //     return res.status(400).json({ error: 'Query or category parameter is required for search' });
+    //   }
 
     // Use category as query if query is not provided
     const searchQuery = query || category;
@@ -137,10 +137,10 @@ const advancedSearch = async (req, res) => {
 
     // Filter Firebase results based on the provided query or category
     const filteredFirebaseBusinesses = firebaseBusinesses.filter(business => 
-      business.businessName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      searchQuery ? (business.businessName.toLowerCase().includes(searchQuery.toLowerCase()) ||
       business.mainCategory.toLowerCase().includes(searchQuery.toLowerCase()) ||
       business.subCategory.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      business.availableServices.toLowerCase().includes(searchQuery.toLowerCase())
+      business.availableServices.toLowerCase().includes(searchQuery.toLowerCase())) : true
     );
 
     // Combine results, prioritize Firebase first
@@ -219,7 +219,6 @@ const advancedSearch = async (req, res) => {
   }
 };
 
-
 // Search by services
 const searchByServices = async (req, res) => {
   const { services, ...otherParams } = req.query;
@@ -234,20 +233,22 @@ const searchByRating = async (req, res) => {
   return advancedSearch(req, res);
 };
 
-// Search nearby
 const searchNearby = async (req, res) => {
   const { latitude, longitude, radius, category, ...otherParams } = req.query;
   if (!latitude || !longitude) {
     return res.status(400).json({ error: 'Coordinates are required for nearby search' });
   }
-
+  
+  let query;
   // Map category to Google Places type
-  if (category && categoryToGooglePlacesMapping[category]) {
-    otherParams.type = categoryToGooglePlacesMapping[category].type;
-  }
+    if (category && categoryToGooglePlacesMapping[category]) {
+        otherParams.type = categoryToGooglePlacesMapping[category].type;
+        query = category;
+    }
+
 
   //Include category as query parameter to satisfy advancedSearch condition
-  req.query = { latitude, longitude, radius, ...otherParams, query:category };
+  req.query = { latitude, longitude, radius, ...otherParams, query };
   return advancedSearch(req, res);
 };
 
