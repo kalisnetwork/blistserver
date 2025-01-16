@@ -63,7 +63,7 @@ const advancedSearch = async (req, res) => {
     const {
       latitude,
       longitude,
-      radius = 5000,
+      radius = 10000,
       minRating = 0,
       businessStatus,
       sortBy = SORT_OPTIONS.RELEVANCE,
@@ -247,7 +247,6 @@ const searchByRating = async (req, res) => {
   req.query = { ...otherParams, minRating, sortBy: SORT_OPTIONS.RATING };
   return advancedSearch(req, res);
 };
-
 const searchNearby = async (req, res) => {
   const { latitude, longitude, radius, category, ...otherParams } = req.query;
   if (!latitude || !longitude) {
