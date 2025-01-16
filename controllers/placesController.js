@@ -77,8 +77,6 @@ const advancedSearch = async (req, res) => {
     } = req.query;
 
     let coordinates = null;
-
-    // Get coordinates from area/postal code if not provided directly
     if (!latitude || !longitude) {
       if (otherParams.area) {
         coordinates = await getLatLongFromArea(otherParams.area);
@@ -88,46 +86,41 @@ const advancedSearch = async (req, res) => {
     } else {
       coordinates = { latitude, longitude };
     }
-
-      // Ensure either query or category is provided
-    //   if (!query && !category) {
-    //     return res.status(400).json({ error: 'Query or category parameter is required for search' });
-    //   }
-
-    // Use category as query if query is not provided
     const searchQuery = query || category;
 
-    // Build search query
     const { queryString, parameters } = buildAdvancedSearchQuery({ ...otherParams, query: searchQuery });
-
-    // Construct base URL
+      
     let baseUrl;
     if (queryString) {
       baseUrl = `https://maps.googleapis.com/maps/api/place/textsearch/json?query=${encodeURIComponent(queryString)}`;
     } else {
       baseUrl = 'https://maps.googleapis.com/maps/api/place/nearbysearch/json?';
     }
-
-    // Add coordinates and radius if available
     if (coordinates) {
       baseUrl += `&location=${coordinates.latitude},${coordinates.longitude}&radius=${radius}`;
     }
 
-    // Add additional parameters
     if (parameters) {
       baseUrl += `&${parameters}`;
     }
-
-    // Add API key
     baseUrl += `&key=${googleMapsApiKey}`;
+    let allGoogleBusinesses = [];
+    let next_page_token;
 
-    // Fetch results from Google Maps API
-    let googleBusinesses = await fetchBusinesses(baseUrl);
-    googleBusinesses = googleBusinesses.map(business => ({
-      ...business,
-      source: 'Google Maps'
-    }));
-
+    do {
+        let googleBusinesses = await fetchBusinesses(baseUrl + (next_page_token ? `&pagetoken=${next_page_token}` : ''));
+        allGoogleBusinesses = allGoogleBusinesses.concat(googleBusinesses);
+        next_page_token = googleBusinesses.length > 0 ? googleBusinesses[0].next_page_token : null
+      if(googleBusinesses.length > 0 && !next_page_token){
+            next_page_token = null;
+        }
+    } while (next_page_token);
+    
+  allGoogleBusinesses = allGoogleBusinesses.map(business => ({
+        ...business,
+        source: 'Google Maps'
+      }));
+    
     // Fetch results from Firestore
     const querySnapshot = await getDocs(collection(db, 'businessListings'));
     const firebaseBusinesses = [];
@@ -136,15 +129,37 @@ const advancedSearch = async (req, res) => {
     });
 
     // Filter Firebase results based on the provided query or category
-    const filteredFirebaseBusinesses = firebaseBusinesses.filter(business => 
+  const filteredFirebaseBusinesses = firebaseBusinesses.filter(business => 
       searchQuery ? (business.businessName.toLowerCase().includes(searchQuery.toLowerCase()) ||
       business.mainCategory.toLowerCase().includes(searchQuery.toLowerCase()) ||
       business.subCategory.toLowerCase().includes(searchQuery.toLowerCase()) ||
       business.availableServices.toLowerCase().includes(searchQuery.toLowerCase())) : true
-    );
+  );
 
-    // Combine results, prioritize Firebase first
-    let businesses = [...filteredFirebaseBusinesses, ...googleBusinesses];
+      // Combine results, prioritize Firebase first
+    let businesses;
+      if(filteredFirebaseBusinesses.length > 0) {
+          businesses = [...filteredFirebaseBusinesses, ...allGoogleBusinesses];
+      } else {
+           businesses = [...allGoogleBusinesses];
+      }
+  
+
+    // De-duplicate by placeId
+    const uniqueBusinesses = [];
+    const seenPlaceIds = new Set();
+      for (const business of businesses) {
+          if (business.placeId) {
+              if (!seenPlaceIds.has(business.placeId)) {
+                  uniqueBusinesses.push(business);
+                  seenPlaceIds.add(business.placeId);
+              }
+          } else {
+              uniqueBusinesses.push(business);
+          }
+      }
+  
+    businesses = uniqueBusinesses;
 
     // Handle zero results
     if (businesses.length === 0) {
@@ -154,8 +169,7 @@ const advancedSearch = async (req, res) => {
         message: "No businesses found matching the search criteria.",
       });
     }
-
-    // Apply post-fetch filters
+  
     if (minRating > 0) {
       businesses = businesses.filter(business => (business.rating || 0) >= minRating);
     }
@@ -163,30 +177,29 @@ const advancedSearch = async (req, res) => {
     if (businessStatus) {
       businesses = businesses.filter(business => business.businessStatus === businessStatus);
     }
-
-    // Add distance calculation if coordinates are available
+    
     if (coordinates) {
-      businesses = businesses.map(business => ({
-        ...business,
-        distance: calculateDistance(
-          coordinates.latitude,
-          coordinates.longitude,
-          business.geometry?.location?.lat,
-          business.geometry?.location?.lng
-        )
-      }));
+        businesses = businesses.map(business => ({
+          ...business,
+          distance: calculateDistance(
+            coordinates.latitude,
+            coordinates.longitude,
+            business.geometry?.location?.lat,
+            business.geometry?.location?.lng
+          )
+        }));
     }
 
     // Apply sorting
     switch (sortBy) {
       case SORT_OPTIONS.DISTANCE:
-        businesses.sort((a, b) => ascending === 'true' ?
-          (a.distance - b.distance) : (b.distance - a.distance));
-        break;
-      case SORT_OPTIONS.RATING:
-        businesses.sort((a, b) => ascending === 'true' ?
-          ((a.rating || 0) - (b.rating || 0)) : ((b.rating || 0) - (a.rating || 0)));
-        break;
+          businesses.sort((a, b) => ascending === 'true' ?
+              (a.distance - b.distance) : (b.distance - a.distance));
+          break;
+        case SORT_OPTIONS.RATING:
+            businesses.sort((a, b) => ascending === 'true' ?
+            ((a.rating || 0) - (b.rating || 0)) : ((b.rating || 0) - (a.rating || 0)));
+            break;
       case SORT_OPTIONS.PRICE:
         businesses.sort((a, b) => ascending === 'true' ?
           ((a.priceLevel || 0) - (b.priceLevel || 0)) : ((b.priceLevel || 0) - (a.priceLevel || 0)));
@@ -198,27 +211,29 @@ const advancedSearch = async (req, res) => {
       // Add more sorting options as needed
     }
 
-    // Apply pagination
+      // Apply pagination
     if (limit) {
       businesses = businesses.slice(offset, offset + parseInt(limit));
     }
+      if(businesses.length < 20 && !limit){
+          let adjustedLimit = 20
+          businesses = businesses.slice(offset, offset + adjustedLimit)
+      }
 
     // Format response
-    const response = {
-      results: businesses,
-      total: businesses.length,
-      offset: parseInt(offset),
-      limit: limit ? parseInt(limit) : null,
-      hasMore: limit ? businesses.length >= parseInt(limit) : false
-    };
-
+      const response = {
+          results: businesses,
+          total: businesses.length,
+          offset: parseInt(offset),
+          limit: limit ? parseInt(limit) : null,
+          hasMore: limit ? businesses.length >= parseInt(limit) : businesses.length >= 20
+      };
     res.json(response);
   } catch (error) {
     console.error('Error in advanced search:', error);
     res.status(500).json({ error: 'Failed to fetch search results' });
   }
 };
-
 // Search by services
 const searchByServices = async (req, res) => {
   const { services, ...otherParams } = req.query;
@@ -236,19 +251,23 @@ const searchByRating = async (req, res) => {
 const searchNearby = async (req, res) => {
   const { latitude, longitude, radius, category, ...otherParams } = req.query;
   if (!latitude || !longitude) {
-    return res.status(400).json({ error: 'Coordinates are required for nearby search' });
+      return res.status(400).json({ error: 'Coordinates are required for nearby search' });
+  }
+
+  let query;
+  let type;
+
+  // Map category to Google Places type
+  if (category && categoryToGooglePlacesMapping[category]) {
+      type = categoryToGooglePlacesMapping[category].type;
+  }
+
+  if(type) {
+      req.query = { latitude, longitude, radius, ...otherParams, type };
+  } else {
+    req.query = { latitude, longitude, radius, ...otherParams, query:category };
   }
   
-  let query;
-  // Map category to Google Places type
-    if (category && categoryToGooglePlacesMapping[category]) {
-        otherParams.type = categoryToGooglePlacesMapping[category].type;
-        query = category;
-    }
-
-
-  //Include category as query parameter to satisfy advancedSearch condition
-  req.query = { latitude, longitude, radius, ...otherParams, query };
   return advancedSearch(req, res);
 };
 
