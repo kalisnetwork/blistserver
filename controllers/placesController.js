@@ -137,7 +137,8 @@ const advancedSearch = async (req, res) => {
              business.geometry?.location?.lat,
              business.geometry?.location?.lng
           ) : null,
-            openNow : business.openNow
+            openNow : business.openNow,
+             bannerImageUrl: business.bannerImageUrl
       }));
     
     
@@ -207,7 +208,8 @@ const advancedSearch = async (req, res) => {
           ),
           latitude: lat,
           longitude: lng,
-             openNow: business.openNow
+             openNow: business.openNow,
+            bannerImageUrl: business.bannerImageUrl
         };
       }));
 

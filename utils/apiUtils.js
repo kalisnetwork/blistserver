@@ -108,6 +108,8 @@ async function _fetchPlaceDetailsAndCombine(json) {
             }
               const completeDetailsAddress =
                 `${detailsStreetAddress || streetAddress ? detailsStreetAddress || streetAddress : ''} ${detailsSublocality || sublocality ? detailsSublocality || sublocality : ''} , ${detailsCity || city ? detailsCity || city : ''}, ${detailsState || state ? detailsState || state : ''}, ${detailsCountry || country ? detailsCountry || country : ''} ${detailsPostalCode || postalCode ? detailsPostalCode || postalCode : ''}`.trim().replace(/,+/g, ',').replace(/\s+/g, ' ');
+             const bannerImageUrl = json.photos ? `https://maps.googleapis.com/maps/api/place/photo?maxwidth=400&photoreference=${json.photos[0].photo_reference}&key=${googleMapsApiKey}` : null;
+             
               return {
                   businessName: json.name || null,
                 formatted_address: json.formatted_address || null,
@@ -127,7 +129,8 @@ async function _fetchPlaceDetailsAndCombine(json) {
                  city: detailsCity || city,
                  state: detailsState || state,
                 country: detailsCountry || country,
-                  openNow: details.opening_hours?.open_now === true ? true : false
+                  openNow: details.opening_hours?.open_now === true ? true : false,
+                  bannerImageUrl: bannerImageUrl
              };
          } else {
              return {
@@ -149,7 +152,8 @@ async function _fetchPlaceDetailsAndCombine(json) {
                 city: city || null,
                  state: state || null,
                  country: country || null,
-                   openNow: null
+                   openNow: null,
+                  bannerImageUrl:  json.photos ? `https://maps.googleapis.com/maps/api/place/photo?maxwidth=400&photoreference=${json.photos[0].photo_reference}&key=${googleMapsApiKey}` : null
              }
          }
     } catch (error) {
@@ -173,7 +177,8 @@ async function _fetchPlaceDetailsAndCombine(json) {
             city: city || null,
             state: state || null,
             country: country || null,
-            openNow: null
+            openNow: null,
+             bannerImageUrl: json.photos ? `https://maps.googleapis.com/maps/api/place/photo?maxwidth=400&photoreference=${json.photos[0].photo_reference}&key=${googleMapsApiKey}` : null
         };
     }
 }
