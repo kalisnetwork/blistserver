@@ -35,7 +35,7 @@ const advancedSearch = async (req, res) => {
       businessStatus,
        sortBy = SORT_OPTIONS.DISTANCE, // Set default sort to DISTANCE
        ascending = 'true', // Set ascending order as true for closest first
-      limit,
+      limit = 20,
       offset = 0,
       includeDetails = 'false',
       query,
@@ -85,29 +85,28 @@ const advancedSearch = async (req, res) => {
 
     let allGoogleBusinesses = [];
     let next_page_token;
+    let fetchedCount = 0;
+       do {
+            let currentUrl = baseUrl + (next_page_token ? `&pagetoken=${next_page_token}` : '');
+            let googleBusinesses = await fetchBusinesses(currentUrl);
 
-    do {
-      const currentUrl = next_page_token 
-        ? `${baseUrl}&pagetoken=${next_page_token}`
-        : baseUrl;
-        
-      let googleBusinesses = await fetchBusinesses(currentUrl);
-      
-      if (!googleBusinesses || googleBusinesses.length === 0) {
-        break;
-      }
-      
-      allGoogleBusinesses = allGoogleBusinesses.concat(googleBusinesses);
-      next_page_token = googleBusinesses[0]?.next_page_token;
-      
-      if (next_page_token) {
-        // Google requires a short delay between requests when using pagetoken
-        await new Promise(resolve => setTimeout(resolve, 2000));
-      }
-    } while (next_page_token);
+            if (!googleBusinesses || googleBusinesses.length === 0) {
+                break;
+            }
 
-    
-  
+            allGoogleBusinesses = allGoogleBusinesses.concat(googleBusinesses);
+              fetchedCount += googleBusinesses.length;
+            next_page_token = googleBusinesses[0]?.next_page_token;
+            if (next_page_token && fetchedCount >= (parseInt(limit) + parseInt(offset) + 20)) {
+                next_page_token = null; // Stop fetching if we have fetched sufficient amount of google results
+            }
+            if (next_page_token) {
+                 await new Promise(resolve => setTimeout(resolve, 2000));
+            }
+
+
+        } while (next_page_token);
+   
     allGoogleBusinesses = allGoogleBusinesses.map(business => ({
       businessName: business.businessName,
       formatted_address: business.formatted_address,
@@ -290,19 +289,19 @@ const advancedSearch = async (req, res) => {
     }
 
     // Apply pagination
-    if (limit) {
-      businesses = businesses.slice(offset, offset + parseInt(limit));
-    } else if (businesses.length < 20) {
-      businesses = businesses.slice(offset, offset + 20);
-    }
+    const startIndex = parseInt(offset);
+    const endIndex = parseInt(offset) + parseInt(limit);
+    const paginatedBusinesses = businesses.slice(startIndex, endIndex);
+     const hasMore =  businesses.length > endIndex;
+
 
     // Format response
     const response = {
-      results: businesses,
+      results: paginatedBusinesses,
       total: businesses.length,
       offset: parseInt(offset),
-      limit: limit ? parseInt(limit) : null,
-      hasMore: limit ? businesses.length >= parseInt(limit) : businesses.length >= 20
+      limit: parseInt(limit),
+      hasMore: hasMore
     };
 
     res.json(response);
