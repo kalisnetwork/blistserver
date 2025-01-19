@@ -107,7 +107,7 @@ const advancedSearch = async (req, res) => {
 
         } while (next_page_token);
    
-     allGoogleBusinesses = allGoogleBusinesses.map(business => ({
+    allGoogleBusinesses = allGoogleBusinesses.map(business => ({
       businessName: business.businessName,
       formatted_address: business.formatted_address,
        types: business.types,
@@ -127,7 +127,7 @@ const advancedSearch = async (req, res) => {
       state: business.state,
      country: business.country,
         source: 'Google Maps',
-          distance: coordinates ? calculateDistance(
+         distance: coordinates ? calculateDistance(
             parseFloat(coordinates.latitude),
             parseFloat(coordinates.longitude),
              business.geometry?.location?.lat,
@@ -136,12 +136,6 @@ const advancedSearch = async (req, res) => {
             openNow : business.openNow,
              bannerImageUrl: business.bannerImageUrl
       }));
-    
-     if (coordinates) {
-             allGoogleBusinesses = allGoogleBusinesses.filter(business => {
-                return business.distance !== null && business.distance <= radius / 1000; // Convert meters to kilometers
-            })
-         }
     
     
     // Fetch results from Firestore
@@ -215,9 +209,9 @@ const advancedSearch = async (req, res) => {
         };
       }));
 
-      // Filter by distance
+       // Filter by distance
       filteredFirebaseBusinesses = filteredFirebaseBusinesses.filter(business => {
-        return business.distance !== null && business.distance <= radius / 1000; // Convert meters to kilometers
+            return business.distance !== null && business.distance <= radius / 1000; // Convert meters to kilometers
       });
     }
 
@@ -240,8 +234,12 @@ const advancedSearch = async (req, res) => {
       }
     }
     
-    businesses = uniqueBusinesses;
-
+      businesses = uniqueBusinesses;
+       if (coordinates) {
+             businesses = businesses.filter(business => {
+                return business.distance !== null && business.distance <= radius / 1000; // Convert meters to kilometers
+            })
+         }
     // Handle zero results
     if (businesses.length === 0) {
       return res.json({
