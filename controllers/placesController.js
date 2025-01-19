@@ -45,7 +45,7 @@ const advancedSearch = async (req, res) => {
     } = req.query;
 
     let coordinates = null;
-    if (!latitude || !longitude) {
+     if (!latitude || !longitude) {
       if (otherParams.area) {
         coordinates = await getLatLongFromArea(otherParams.area);
       } else if (otherParams.postalCode) {
@@ -57,25 +57,22 @@ const advancedSearch = async (req, res) => {
 
     // Build the base URL with required parameters
     let baseUrl = 'https://maps.googleapis.com/maps/api/place/textsearch/json?';
-
+      let searchQuery;
     // Ensure we have a query parameter (required for textsearch)
-    let searchQuery;
     if (query) {
-      searchQuery = query;
+       searchQuery = query
     } else if (category) {
-      // If no direct query, use category as the search term
-      searchQuery = `${category} in ${coordinates.latitude},${coordinates.longitude}`;
+        // If no direct query, use category as the search term
+      searchQuery = `${category}`;
     } else {
-      // Fallback query if neither query nor category is provided
-      searchQuery = 'businesses';
+        searchQuery = 'businesses'; // fallback
     }
-
-    // Add query parameter first (required)
     baseUrl += `query=${encodeURIComponent(searchQuery)}`;
 
     // Add location and radius
     if (coordinates) {
       baseUrl += `&location=${coordinates.latitude},${coordinates.longitude}&radius=${radius}`;
+         baseUrl += `&locationbias=circle:${radius}@${coordinates.latitude},${coordinates.longitude}`
     }
 
     // Add type if category mapping exists
