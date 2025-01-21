@@ -129,6 +129,7 @@ async function _fetchPlaceDetailsAndCombine(json) {
                  city: detailsCity || city,
                  state: detailsState || state,
                 country: detailsCountry || country,
+                 postalCode: detailsPostalCode || postalCode, // Adding postal code here
                   openNow: details.opening_hours?.open_now === true ? true : false,
                   bannerImageUrl: bannerImageUrl
              };
@@ -152,6 +153,7 @@ async function _fetchPlaceDetailsAndCombine(json) {
                 city: city || null,
                  state: state || null,
                  country: country || null,
+                   postalCode: postalCode || null, // Adding postal code here
                    openNow: null,
                   bannerImageUrl:  json.photos ? `https://maps.googleapis.com/maps/api/place/photo?maxwidth=400&photoreference=${json.photos[0].photo_reference}&key=${googleMapsApiKey}` : null
              }
@@ -177,6 +179,7 @@ async function _fetchPlaceDetailsAndCombine(json) {
             city: city || null,
             state: state || null,
             country: country || null,
+             postalCode: postalCode || null, // Adding postal code here
             openNow: null,
              bannerImageUrl: json.photos ? `https://maps.googleapis.com/maps/api/place/photo?maxwidth=400&photoreference=${json.photos[0].photo_reference}&key=${googleMapsApiKey}` : null
         };

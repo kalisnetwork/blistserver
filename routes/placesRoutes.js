@@ -8,5 +8,5 @@ router.get('/search/services', placesController.searchByServices);
 router.get('/search/rating', placesController.searchByRating);
 router.get('/search/nearby', placesController.searchNearby);
 router.get('/businessListings', placesController.getBusinessListings);
-
+router.get('/geocode/postalcode', placesController.getLatLongByPostalCode);
 export default router;
