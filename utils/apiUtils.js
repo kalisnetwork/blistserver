@@ -1,16 +1,6 @@
 import fetch from 'node-fetch';
 import { googleMapsApiKey } from "../config.js";
 
-// Helper function to extract postal code from address components
-const extractPostalCode = (addressComponents) => {
-    for (const component of addressComponents) {
-        if (component.types.includes("postal_code")) {
-            return component.long_name;
-        }
-    }
-    return null;
-};
-
 // Fetch businesses from Google Places API
 export const fetchBusinesses = async (url, query) => {
     try {
@@ -19,16 +9,16 @@ export const fetchBusinesses = async (url, query) => {
             throw new Error(`HTTP error! status: ${response.status}`);
         }
         const data = await response.json();
-         if (data.status === "OK") {
+        if (data.status === "OK") {
             const results = data.results || [];
             let enhancedResults = await Promise.all(results.map(async (result) => {
                 return await _fetchPlaceDetailsAndCombine(result);
             }));
             return enhancedResults;
         } else if (data.status === "ZERO_RESULTS") {
-             return [];
+            return [];
         } else {
-             throw new Error(`API error! status: ${data.status}`);
+            throw new Error(`API error! status: ${data.status}`);
         }
     } catch (error) {
         console.log("error:", error);
@@ -38,14 +28,14 @@ export const fetchBusinesses = async (url, query) => {
 
 // Helper function to fetch place details and combine with basic data
 async function _fetchPlaceDetailsAndCombine(json) {
-  let city = null;
-  let state = null;
-  let country = null;
-  let postalCode = null;
-  let streetAddress = null;
-  const addressComponents = json.address_components || [];
-  let sublocality = '';
-  let route = '';
+    let city = null;
+    let state = null;
+    let country = null;
+    let postalCode = null;
+    let streetAddress = null;
+    const addressComponents = json.address_components || [];
+    let sublocality = '';
+    let route = '';
 
     for (const component of addressComponents) {
         const types = component.types || [];
@@ -61,6 +51,9 @@ async function _fetchPlaceDetailsAndCombine(json) {
         if (types.includes("country")) {
             country = component.long_name;
         }
+        if (types.includes("postal_code")) {
+            postalCode = component.long_name;
+        }
         if (types.includes("route")) {
             route = component.long_name;
         }
@@ -69,27 +62,26 @@ async function _fetchPlaceDetailsAndCombine(json) {
         }
     }
 
-    postalCode = extractPostalCode(addressComponents);
-
-
     const completeAddress = `${streetAddress ? streetAddress : ''} ${sublocality ? sublocality : ''} , ${city ? city : ''}, ${state ? state : ''}, ${country ? country : ''} ${postalCode ? postalCode : ''}`.trim().replace(/,+/g, ',').replace(/\s+/g, ' ');
     const mainCategory = json.types?.find((type) => (type === 'postal_code')) || json.types?.[0];
-  try {
-    const placeDetailsUrl = `https://maps.googleapis.com/maps/api/place/details/json?place_id=${json.place_id}&fields=formatted_phone_number,opening_hours,website,address_components,types&key=${googleMapsApiKey}`;
+    try {
+        const placeDetailsUrl = `https://maps.googleapis.com/maps/api/place/details/json?place_id=${json.place_id}&fields=formatted_phone_number,opening_hours,website,address_components,types&key=${googleMapsApiKey}`;
         const detailsResponse = await fetch(placeDetailsUrl);
-    if (!detailsResponse.ok) {
+        if (!detailsResponse.ok) {
             throw new Error(`Place Details HTTP error! status: ${detailsResponse.status}`);
         }
-    const detailsData = await detailsResponse.json();
-      if (detailsData.status === "OK") {
-        const details = detailsData.result;
-          let detailsCity = city;
+        const detailsData = await detailsResponse.json();
+        if (detailsData.status === "OK") {
+            const details = detailsData.result;
+            let detailsCity = city;
             let detailsState = state;
             let detailsCountry = country;
+            let detailsPostalCode = postalCode;
             let detailsStreetAddress = streetAddress;
             let detailsSublocality = sublocality;
-             let detailsRoute = route;
-          const detailsAddressComponents = details.address_components || [];
+            let detailsRoute = route;
+
+            const detailsAddressComponents = details.address_components || [];
             for (const component of detailsAddressComponents) {
                 const types = component.types || [];
                 if (types.includes("sublocality_level_1")) {
@@ -104,95 +96,116 @@ async function _fetchPlaceDetailsAndCombine(json) {
                 if (types.includes("country")) {
                     detailsCountry = component.long_name;
                 }
+                if (types.includes("postal_code")) {
+                    detailsPostalCode = component.long_name;
+                }
                 if (types.includes("route")) {
-                   detailsRoute = component.long_name;
+                    detailsRoute = component.long_name;
                 }
                 if (types.includes("street_address")) {
-                  detailsStreetAddress = component.long_name;
-              }
+                    detailsStreetAddress = component.long_name;
+                }
             }
-           postalCode = extractPostalCode(detailsAddressComponents) || postalCode;
-          const completeDetailsAddress =
-          `${detailsStreetAddress || streetAddress ? detailsStreetAddress || streetAddress : ''} ${detailsSublocality || sublocality ? detailsSublocality || sublocality : ''} , ${detailsCity || city ? detailsCity || city : ''}, ${detailsState || state ? detailsState || state : ''}, ${detailsCountry || country ? detailsCountry || country : ''} ${postalCode ? postalCode : ''}`.trim().replace(/,+/g, ',').replace(/\s+/g, ' ');
-        const bannerImageUrl = json.photos ? `https://maps.googleapis.com/maps/api/place/photo?maxwidth=400&photoreference=${json.photos[0].photo_reference}&key=${googleMapsApiKey}` : null;
-
-        return {
-            businessName: json.name || null,
-            formatted_address: json.formatted_address || null,
-            types: json.types || null,
-            placeId: json.place_id,
-            phoneNumber: details.formatted_phone_number || null,
-            websiteUrl: details.website || null,
-            businessHours: details.opening_hours?.weekday_text?.join('\n') || null,
-            photos: json.photos || null,
-            rating: json.rating || null,
-            user_ratings_total: json.user_ratings_total || null,
-            geometry: json.geometry || null,
-            availableServices: json.types?.join(", ") || null,
-            mainCategory: mainCategory || null,
-             subCategory: json.types?.[1] || null,
-            completeAddress: completeDetailsAddress || null,
-            city: detailsCity || city,
-            state: detailsState || state,
-            country: detailsCountry || country,
-             postalCode: postalCode,
-            openNow: details.opening_hours?.open_now === true ? true : false,
-            bannerImageUrl: bannerImageUrl
-        };
-      } else {
-          return {
-                businessName: json.name || null,
+            const completeDetailsAddress =
+              `${detailsStreetAddress || streetAddress ? detailsStreetAddress || streetAddress : ''} ${detailsSublocality || sublocality ? detailsSublocality || sublocality : ''} , ${detailsCity || city ? detailsCity || city : ''}, ${detailsState || state ? detailsState || state : ''}, ${detailsCountry || country ? detailsCountry || country : ''} ${detailsPostalCode || postalCode ? detailsPostalCode || postalCode : ''}`.trim().replace(/,+/g, ',').replace(/\s+/g, ' ');
+             const bannerImageUrl = json.photos ? `https://maps.googleapis.com/maps/api/place/photo?maxwidth=400&photoreference=${json.photos[0].photo_reference}&key=${googleMapsApiKey}` : null;
+              return {
+                  businessName: json.name || null,
                 formatted_address: json.formatted_address || null,
-                types: json.types || null,
-                placeId: json.place_id,
-                 phoneNumber: json.formatted_phone_number || null,
-                websiteUrl: null,
-               businessHours: null,
-                 photos: json.photos || null,
-                 rating: json.rating || null,
-                 user_ratings_total: json.user_ratings_total || null,
-                geometry: json.geometry || null,
-                 availableServices: json.types?.join(", ") || null,
+                  types: json.types || null,
+                   placeId: json.place_id,
+                 phoneNumber: details.formatted_phone_number || null,
+                 websiteUrl: details.website || null,
+                 businessHours: details.opening_hours?.weekday_text?.join('\n') || null,
+                    photos: json.photos || null,
+                  rating: json.rating || null,
+                  user_ratings_total: json.user_ratings_total || null,
+                  geometry: json.geometry || null,
+                     availableServices: json.types?.join(", ") || null,
                 mainCategory: mainCategory || null,
                 subCategory: json.types?.[1] || null,
-                completeAddress: completeAddress || null,
-               city: city || null,
-                state: state || null,
-               country: country || null,
-                 postalCode: postalCode || null,
-                openNow: null,
-               bannerImageUrl: json.photos ? `https://maps.googleapis.com/maps/api/place/photo?maxwidth=400&photoreference=${json.photos[0].photo_reference}&key=${googleMapsApiKey}` : null
-            };
-      }
+                   completeAddress: completeDetailsAddress || null,
+                 city: detailsCity || city,
+                 state: detailsState || state,
+                country: detailsCountry || country,
+                 postalCode: detailsPostalCode || postalCode,
+                  openNow: details.opening_hours?.open_now === true ? true : false,
+                  bannerImageUrl: bannerImageUrl
+             };
+         } else {
+             return {
+                businessName: json.name || null,
+                formatted_address: json.formatted_address || null,
+                  types: json.types || null,
+                 placeId: json.place_id,
+                  phoneNumber: json.formatted_phone_number || null,
+                 websiteUrl: null,
+                businessHours: null,
+                  photos: json.photos || null,
+                  rating: json.rating || null,
+                  user_ratings_total: json.user_ratings_total || null,
+                geometry: json.geometry || null,
+                     availableServices: json.types?.join(", ") || null,
+                mainCategory: mainCategory || null,
+                subCategory: json.types?.[1] || null,
+                 completeAddress: completeAddress || null,
+                city: city || null,
+                 state: state || null,
+                 country: country || null,
+                postalCode: postalCode || null,
+                   openNow: null,
+                  bannerImageUrl:  json.photos ? `https://maps.googleapis.com/maps/api/place/photo?maxwidth=400&photoreference=${json.photos[0].photo_reference}&key=${googleMapsApiKey}` : null
+             }
+        }
     } catch (error) {
-      const mainCategory = json.types?.find((type) => (type === 'postal_code')) || json.types?.[0];
+       const mainCategory = json.types?.find((type) => (type === 'postal_code')) || json.types?.[0];
         return {
             businessName: json.name || null,
             formatted_address: json.formatted_address || null,
             types: json.types || null,
              placeId: json.place_id,
               phoneNumber: json.formatted_phone_number || null,
-            websiteUrl: null,
-           businessHours: null,
+             websiteUrl: null,
+            businessHours: null,
              photos: json.photos || null,
              rating: json.rating || null,
              user_ratings_total: json.user_ratings_total || null,
               geometry: json.geometry || null,
-               availableServices: json.types?.join(", ") || null,
-            mainCategory: mainCategory || null,
-            subCategory: json.types?.[1] || null,
-            completeAddress: completeAddress || null,
+                 availableServices: json.types?.join(", ") || null,
+                mainCategory: mainCategory || null,
+               subCategory: json.types?.[1] || null,
+             completeAddress: completeAddress || null,
             city: city || null,
             state: state || null,
-           country: country || null,
-             postalCode: postalCode || null,
+            country: country || null,
+            postalCode: postalCode || null,
             openNow: null,
-            bannerImageUrl: json.photos ? `https://maps.googleapis.com/maps/api/place/photo?maxwidth=400&photoreference=${json.photos[0].photo_reference}&key=${googleMapsApiKey}` : null
+             bannerImageUrl: json.photos ? `https://maps.googleapis.com/maps/api/place/photo?maxwidth=400&photoreference=${json.photos[0].photo_reference}&key=${googleMapsApiKey}` : null
         };
     }
 }
 
-
+// Get latitude and longitude from a postal code
+export const getLatLongFromPostalCode = async (postalCode) => {
+    const geocodeUrl = `https://maps.googleapis.com/maps/api/geocode/json?address=${postalCode}&key=${googleMapsApiKey}`;
+    try {
+        const geocodeResponse = await fetch(geocodeUrl);
+        if (!geocodeResponse.ok) {
+            throw new Error(`Geocode HTTP error! status: ${geocodeResponse.status}`);
+        }
+        const geocodeData = await geocodeResponse.json();
+        if (geocodeData.status === "OK") {
+            const result = geocodeData.results[0];
+            const location = result.geometry.location;
+            return { latitude: location.lat, longitude: location.lng };
+        } else {
+            throw new Error(`Geocode API error! status: ${geocodeData.status}`);
+        }
+    } catch (error) {
+        console.log('error in Geocode:', error);
+        return { latitude: null, longitude: null };
+    }
+};
 
 // Get latitude and longitude from an area name (e.g., city or neighborhood)
 export const getLatLongFromArea = async (area) => {
