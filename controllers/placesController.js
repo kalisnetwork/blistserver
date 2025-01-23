@@ -23,6 +23,14 @@ const calculateDistance = (lat1, lon1, lat2, lon2) => {
     return distance;
 };
 
+// Helper function to map Subscription data
+const mapSubscriptionData = (sub) => ({
+    price: sub.price || 0,
+    billingCycle: sub.billingCycle || 'monthly',
+    paymentStatus: sub.paymentStatus || 'incomplete',
+    paymentDate: sub.paymentDate ? sub.paymentDate.toDate() : null,
+});
+
 const fetchGoogleBusinessesWithRadius = async (baseUrl, coordinates, radius, limit, offset, existingBusinesses) => {
     let allGoogleBusinesses = existingBusinesses || [];
     let next_page_token;
@@ -71,8 +79,8 @@ const advancedSearch = async (req, res) => {
 
         let coordinates = null;
 
-        // Condition to require coordinates only when no query is available
-        if (!query && (!latitude || !longitude)) {
+        // Condition to require coordinates only when no query or category is available
+        if (!query && !category && (!latitude || !longitude)) {
             if (otherParams.area) {
                 coordinates = await getLatLongFromArea(otherParams.area);
             } else if (otherParams.postalCode) {
@@ -82,9 +90,9 @@ const advancedSearch = async (req, res) => {
             coordinates = { latitude, longitude };
         }
 
-        // Only require coordinates if no query is given
-        if (!query && !coordinates) {
-            return res.status(400).json({ error: "Coordinates or query are required" });
+        // Only require coordinates if no query or category is given
+        if (!query && !category && !coordinates) {
+            return res.status(400).json({ error: "Coordinates, query, or category are required" });
         }
 
         let searchQuery;
@@ -103,7 +111,7 @@ const advancedSearch = async (req, res) => {
         if (query) {
             searchQuery = query;
         } else if (category) {
-            searchQuery = `${category}`;
+            searchQuery = category;
         } else {
             searchQuery = 'businesses'; // fallback
         }
@@ -113,8 +121,7 @@ const advancedSearch = async (req, res) => {
         if (coordinates) {
             baseUrl += `&location=${coordinates.latitude},${coordinates.longitude}`;
 
-                baseUrl += `&locationbias=circle:${5000}@${coordinates.latitude},${coordinates.longitude}` // radius is required when locationbias parameter used.
-
+                 baseUrl += `&locationbias=circle:${5000}@${coordinates.latitude},${coordinates.longitude}` // radius is required when locationbias parameter used.
         }
 
         // Add type if category mapping exists
@@ -128,8 +135,8 @@ const advancedSearch = async (req, res) => {
         if (coordinates) {
             for (let i = 0; i <= currentRadiusIndex; i++) {
                 const radius = radii[i];
-                 allGoogleBusinesses = await fetchGoogleBusinessesWithRadius(baseUrl, coordinates, radius, limit, offset, allGoogleBusinesses);
-                 await new Promise(resolve => setTimeout(resolve, 200));
+                allGoogleBusinesses = await fetchGoogleBusinessesWithRadius(baseUrl, coordinates, radius, limit, offset, allGoogleBusinesses);
+                await new Promise(resolve => setTimeout(resolve, 200));
             }
         } else {
             allGoogleBusinesses = await fetchBusinesses(baseUrl);
@@ -170,20 +177,26 @@ const advancedSearch = async (req, res) => {
         // Fetch results from Firestore
         const querySnapshot = await getDocs(collection(db, 'businessListings'));
         const firebaseBusinesses = [];
-        for(const doc of querySnapshot.docs){
-           const data = doc.data();
-          const subscriptions = (data.subscriptions || []).map(sub => ({
-              price: sub.price || 0,
-               billingCycle: sub.billingCycle || 'monthly',
-                paymentStatus: sub.paymentStatus || 'incomplete',
-                paymentDate: sub.paymentDate ? sub.paymentDate.toDate() : null,
+         for (const doc of querySnapshot.docs) {
+          const data = doc.data();
 
-           }));
-           const pamphlets = data.pamphlets || [];
-           const offers = data.offers || [];
+          // Map subscriptions correctly
+          const subscriptions = (data.subscriptions || []).map(mapSubscriptionData);
 
-           firebaseBusinesses.push({ id: doc.id, ...data, source: 'Firebase', subscriptions: subscriptions, pamphlets: pamphlets, offers: offers });
-       };
+          // Retrieve pamphlets and offers (ensuring they're always arrays)
+          const pamphlets = data.pamphlets || [];
+          const offers = data.offers || [];
+
+          // Construct the Firebase business object
+          firebaseBusinesses.push({
+            id: doc.id,
+            ...data,
+            source: 'Firebase',
+            subscriptions: subscriptions, // Use the mapped subscriptions
+            pamphlets: pamphlets,
+            offers: offers,
+          });
+        }
 
         // Filter Firebase results based on the provided query or category
         let filteredFirebaseBusinesses = firebaseBusinesses.filter(business =>
@@ -261,29 +274,29 @@ const advancedSearch = async (req, res) => {
             ? [...filteredFirebaseBusinesses, ...allGoogleBusinesses]
             : [...allGoogleBusinesses];
 
-       // De-duplicate by placeId
+        // De-duplicate by placeId
         const uniqueBusinesses = [];
         const seenPlaceIds = new Set();
         for (const business of businesses) {
-           if (business.placeId) {
-             if (!seenPlaceIds.has(business.placeId)) {
-               uniqueBusinesses.push(business);
-               seenPlaceIds.add(business.placeId);
+            if (business.placeId) {
+                if (!seenPlaceIds.has(business.placeId)) {
+                    uniqueBusinesses.push(business);
+                    seenPlaceIds.add(business.placeId);
+                }
+            } else {
+                uniqueBusinesses.push(business);
             }
-           } else {
-             uniqueBusinesses.push(business);
-           }
-       }
+        }
 
-       businesses = uniqueBusinesses;
+        businesses = uniqueBusinesses;
 
         // Handle zero results
         if (businesses.length === 0) {
-          return res.json({
-              results: [],
-              total: 0,
-            message: "No businesses found matching the search criteria.",
-          });
+            return res.json({
+                results: [],
+                total: 0,
+                message: "No businesses found matching the search criteria.",
+            });
         }
 
         if (minRating > 0) {
@@ -396,17 +409,26 @@ const searchNearby = async (req, res) => {
 export const getBusinessListings = async (req, res) => {
   try {
       const querySnapshot = await getDocs(collection(db, 'businessListings'));
-    const listings = [];
-    querySnapshot.forEach((doc) => {
-      const data = doc.data();
-      const subscriptions = (data.subscriptions || []).map(sub => ({
-         price: sub.price || 0,
-           billingCycle: sub.billingCycle || 'monthly',
-            paymentStatus: sub.paymentStatus || 'incomplete',
-            paymentDate: sub.paymentDate ? sub.paymentDate.toDate() : null,
-      }));
-       listings.push({ id: doc.id, ...data, subscriptions: subscriptions });
-     });
+     const listings = querySnapshot.docs.map(doc => {
+          const data = doc.data();
+
+          // Map subscriptions correctly
+          const subscriptions = (data.subscriptions || []).map(mapSubscriptionData);
+
+          // Retrieve pamphlets and offers (ensuring they're always arrays)
+          const pamphlets = data.pamphlets || [];
+          const offers = data.offers || [];
+
+          // Construct the Firebase business object
+          return {
+            id: doc.id,
+            ...data,
+            source: 'Firebase',
+            subscriptions: subscriptions, // Use the mapped subscriptions
+            pamphlets: pamphlets,
+            offers: offers,
+          };
+        });
     res.json(listings);
   } catch (error) {
      console.error('Error fetching business listings:', error);
