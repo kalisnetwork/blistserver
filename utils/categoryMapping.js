@@ -8,7 +8,7 @@ export const categoryToGooglePlacesMapping = {
   'Appliance Repair': { type: 'home_service', keywords: 'appliance repair maintenance' },
   'Architects': { type: 'establishment', keywords: 'architect design planning' },
   'Art Galleries': { type: 'art_gallery', keywords: 'art exhibition' },
- 'Art Supplies': { type: 'store', keywords: 'art supplies craft' },
+  'Art Supplies': { type: 'store', keywords: 'art supplies craft' },
   'Astrologers': { type: 'establishment', keywords: 'astrologer fortune teller' },
   'Audio Equipment Store': {type: 'electronics_store', keywords: 'audio equipment speakers sound'},
   'Auto Body Shop': {type: 'car_repair', keywords: 'body repair collision'},
@@ -20,7 +20,7 @@ export const categoryToGooglePlacesMapping = {
   'Bakeries': { type: 'bakery', keywords: 'bread cakes pastry' },
    'Bakery': { type: 'bakery', keywords: 'bakery pastry' },
   'Banks': { type: 'bank', keywords: 'banking financial services' },
-  'Banks & ATMs': { type: 'bank', keywords: 'banking atm' },
+  'Banks & ATMs': { type: 'bank', keywords: 'banking atm cash machine' }, // Added keyword 'cash machine'
   'Bars & Pubs': { type: 'bar', keywords: 'pub tavern' },
   'Battery Shop': {type: 'car_repair', keywords: 'battery sale replacement'},
   'Bed & Breakfast': { type: 'lodging', keywords: 'bed and breakfast accommodation' },
@@ -54,7 +54,7 @@ export const categoryToGooglePlacesMapping = {
   'Computer & Laptop Repair & Services': { type: 'electronics_repair', keywords: 'computer laptop repair' },
   'Computer Training Institutes': { type: 'school', keywords: 'computer training education' },
    'Concrete Contractors': {type: 'home_service', keywords: 'concrete pouring repair'},
- 'Consultants': { type: 'establishment', keywords: 'consulting business' },
+ 'Consultants': { type: 'establishment', keywords: 'consulting business advisor' }, // Added 'advisor'
   'Courier Services': { type: 'post_office', keywords: 'courier delivery' },
   'Craft Stores': { type: 'store', keywords: 'craft supplies hobby' },
   'Dance Schools': { type: 'dance_studio', keywords: 'dance instruction' },
@@ -64,7 +64,7 @@ export const categoryToGooglePlacesMapping = {
   'Dermatologists': { type: 'doctor', keywords: 'dermatologist skin' },
  'Dentists': { type: 'dentist', keywords: 'dental' },
   'Diagnostic Imaging': {type: 'health', keywords: 'medical imaging radiology'},
-   'Digital Marketing Agency': { type: 'establishment', keywords: 'digital marketing seo' },
+   'Digital Marketing Agency': { type: 'establishment', keywords: 'digital marketing seo sem' }, // Added 'seo sem'
     'Driving Schools': { type: 'school', keywords: 'driving instruction' },
   'Dry Cleaners': { type: 'laundry', keywords: 'dry cleaning' },
   'Electricians': { type: 'electrician', keywords: 'electrical service' },
@@ -102,7 +102,7 @@ export const categoryToGooglePlacesMapping = {
     'Home Security': { type: 'establishment', keywords: 'security systems cctv' },
   'Hospitals': { type: 'hospital', keywords: 'medical center' },
    'Hotels': { type: 'lodging', keywords: 'accommodation' },
-  'Housekeeping Services': { type: 'home_service', keywords: 'cleaning housekeeping' },
+  'Housekeeping Services': { type: 'home_service', keywords: 'cleaning housekeeping maid service' }, // Added 'maid service'
    'Hobbies': { type: 'store', keywords: 'hobby craft' },
   'Indian Restaurants': { type: 'restaurant', keywords: 'Indian food curry biryani' },
  'Insurance Agents': { type: 'insurance_agency', keywords: 'insurance broker' },
@@ -238,5 +238,8 @@ export const categoryToGooglePlacesMapping = {
  'Specialty Diet Catering': {type: 'food', keywords: 'vegetarian vegan gluten free catering'},
  'Dessert Catering': {type: 'food', keywords: 'dessert catering cakes pastries'},
 'Catering Staffing': {type: 'food', keywords: 'catering staff servers bartenders'},
+  'Coffee & Tea': { type: 'cafe', keywords: 'coffee tea cafe beverages espresso latte cappuccino' }, // More specific keywords
+  'Grocery Store': { type: 'grocery_store', keywords: 'grocery supermarket food groceries' }, // More keywords
+  'Electronics Store': { type: 'electronics_store', keywords: 'electronics gadgets computers phones tv' }, // More keywords
 
 };

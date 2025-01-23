@@ -1,5 +1,5 @@
 import { googleMapsApiKey } from '../config.js';
-import { fetchBusinesses, applyFilters, applySorting, getLatLongFromPostalCode, getLatLongFromArea } from '../utils/apiUtils.js';
+import { fetchBusinesses,  getLatLongFromArea } from '../utils/apiUtils.js';
 import { categoryToGooglePlacesMapping } from '../utils/categoryMapping.js';
 import { SEARCH_TYPES, SORT_OPTIONS } from '../utils/searchUtils.js';
 import { db } from '../utils/firebase.js';
@@ -7,22 +7,48 @@ import { collection, getDocs } from 'firebase/firestore';
 
 // Helper function to calculate distance between two coordinates
 const calculateDistance = (lat1, lon1, lat2, lon2) => {
+    if (lat2 == null || lon2 == null || lat1 == null || lon1 == null) {
+        return null;
+    }
 
-  if (lat2 == null || lon2 == null || lat1 == null || lon1 == null) {
-      return null;
-  }
+    const R = 6371; // Earth's radius in km
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLon = (lon2 - lon1) * Math.PI / 180;
+    const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+        Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    const distance = R * c;
 
-  const R = 6371; // Earth's radius in km
-  const dLat = (lat2 - lat1) * Math.PI / 180;
-  const dLon = (lon2 - lon1) * Math.PI / 180;
-  const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
-      Math.sin(dLon / 2) * Math.sin(dLon / 2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  const distance = R * c;
-
-  return distance;
+    return distance;
 };
+
+const fetchGoogleBusinessesWithRadius = async (baseUrl, coordinates, radius, limit, offset, existingBusinesses) => {
+    let allGoogleBusinesses = existingBusinesses || [];
+    let next_page_token;
+    let fetchedCount = 0;
+    const baseUrlWithRadius = baseUrl + `&location=${coordinates.latitude},${coordinates.longitude}&radius=${radius}` +
+        `&locationbias=circle:${radius}@${coordinates.latitude},${coordinates.longitude}`
+     do {
+        let currentUrl = baseUrlWithRadius + (next_page_token ? `&pagetoken=${next_page_token}` : '');
+        let googleBusinesses = await fetchBusinesses(currentUrl);
+
+        if (!googleBusinesses || googleBusinesses.length === 0) {
+            break;
+        }
+
+        allGoogleBusinesses = allGoogleBusinesses.concat(googleBusinesses);
+        fetchedCount += googleBusinesses.length;
+        next_page_token = googleBusinesses[0]?.next_page_token;
+         if (next_page_token && fetchedCount >= (parseInt(limit) + parseInt(offset) + 20)) {
+               next_page_token = null; // Stop fetching if we have fetched sufficient amount of google results
+            }
+            if (next_page_token) {
+                 await new Promise(resolve => setTimeout(resolve, 500));
+            }
+        } while (next_page_token);
+        return allGoogleBusinesses;
+}
 
 
 const advancedSearch = async (req, res) => {
@@ -32,96 +58,56 @@ const advancedSearch = async (req, res) => {
             longitude,
             minRating = 0,
             businessStatus,
-             sortBy = SORT_OPTIONS.DISTANCE, // Set default sort to DISTANCE
-             ascending = 'true', // Set ascending order as true for closest first
+            sortBy = SORT_OPTIONS.DISTANCE,
+            ascending = 'true',
             limit = 20,
             offset = 0,
             includeDetails = 'false',
             query,
             category,
-             openNow, // Include openNow in parameters
+            openNow,
+             postalCode, // Directly use postalCode parameter
             ...otherParams
         } = req.query;
 
-        let coordinates = null;
-         if (!latitude || !longitude) {
-          if (otherParams.area) {
-            coordinates = await getLatLongFromArea(otherParams.area);
-          } else if (otherParams.postalCode) {
-            coordinates = await getLatLongFromPostalCode(otherParams.postalCode);
-          }
-        } else {
-          coordinates = { latitude, longitude };
-        }
+      let coordinates = null;
 
-        if(!coordinates){
-           return res.status(400).json({ error: "Coordinates are required" });
-        }
-        let searchQuery; // Declare searchQuery here
-        const radii = [500, 1000, 1500, 2000, 2500, 3000, 3500, 4000, 4500, 5000];
-          let allGoogleBusinesses = [];
+
+        if (latitude && longitude) {
+           coordinates = { latitude, longitude };
+          }
+
+
+        let searchQuery;
+        const radii = [500, 1000, 1500, 2000, 2500, 3000];
+        let allGoogleBusinesses = [];
         const startIndex = parseInt(offset);
         const endIndex = parseInt(offset) + parseInt(limit);
-         let currentRadiusIndex = 0;
-        if(offset > 0){
-           currentRadiusIndex = Math.floor(startIndex / parseInt(limit));
+        let currentRadiusIndex = 0;
+        if (offset > 0) {
+            currentRadiusIndex = Math.floor(startIndex / parseInt(limit));
         }
-
-          for(let i = 0; i <= currentRadiusIndex; i++){
-              const radius = radii[i];
-              // Build the base URL with required parameters
+       if(latitude && longitude){
             let baseUrl = 'https://maps.googleapis.com/maps/api/place/textsearch/json?';
-
-            // Ensure we have a query parameter (required for textsearch)
             if (query) {
-              searchQuery = query
+                searchQuery = query
             } else if (category) {
-                // If no direct query, use category as the search term
-              searchQuery = `${category}`;
+                searchQuery = `${category}`;
             } else {
-                searchQuery = 'businesses'; // fallback
+                searchQuery = 'businesses';
             }
-            baseUrl += `query=${encodeURIComponent(searchQuery)}`;
-
-            // Add location and radius
-            if (coordinates) {
-               baseUrl += `&location=${coordinates.latitude},${coordinates.longitude}&radius=${radius}`;
-                baseUrl += `&locationbias=circle:${radius}@${coordinates.latitude},${coordinates.longitude}`
-             }
-
-            // Add type if category mapping exists
+             baseUrl += `query=${encodeURIComponent(searchQuery)}`;
             if (category && categoryToGooglePlacesMapping[category]) {
-              baseUrl += `&type=${categoryToGooglePlacesMapping[category].type}`;
+                baseUrl += `&type=${categoryToGooglePlacesMapping[category].type}`;
             }
-
-            // Add API key
             baseUrl += `&key=${googleMapsApiKey}`;
-
-            let next_page_token;
-            let fetchedCount = 0;
-             do {
-                    let currentUrl = baseUrl + (next_page_token ? `&pagetoken=${next_page_token}` : '');
-                    let googleBusinesses = await fetchBusinesses(currentUrl);
-
-                    if (!googleBusinesses || googleBusinesses.length === 0) {
-                        break;
-                    }
-
-                    allGoogleBusinesses = allGoogleBusinesses.concat(googleBusinesses);
-                    fetchedCount += googleBusinesses.length;
-                    next_page_token = googleBusinesses[0]?.next_page_token;
-                  if (next_page_token && fetchedCount >= (parseInt(limit) + parseInt(offset) + 20)) {
-                        next_page_token = null; // Stop fetching if we have fetched sufficient amount of google results
-                    }
-                     if (next_page_token) {
-                          await new Promise(resolve => setTimeout(resolve, 500));
-                     }
-
-            } while (next_page_token);
-
-               await new Promise(resolve => setTimeout(resolve, 200)); // Introduce a delay
-           }
-
+            for (let i = 0; i <= currentRadiusIndex; i++) {
+            const radius = radii[i];
+            coordinates = { latitude, longitude };
+            allGoogleBusinesses = await fetchGoogleBusinessesWithRadius(baseUrl, coordinates, radius, limit, offset, allGoogleBusinesses);
+            await new Promise(resolve => setTimeout(resolve, 200));
+        }
+        }
         allGoogleBusinesses = allGoogleBusinesses.map(business => ({
             businessName: business.businessName,
             formatted_address: business.formatted_address,
@@ -141,138 +127,142 @@ const advancedSearch = async (req, res) => {
             city: business.city,
             state: business.state,
             country: business.country,
+            postalCode: business.postalCode,
             source: 'Google Maps',
-            distance: coordinates ? calculateDistance(
-                parseFloat(coordinates.latitude),
-                parseFloat(coordinates.longitude),
+            distance:  (latitude && longitude) ? calculateDistance(
+                parseFloat(latitude),
+                parseFloat(longitude),
                 business.geometry?.location?.lat,
                 business.geometry?.location?.lng
             ) : null,
-              openNow : business.openNow,
+             openNow: business.openNow,
             bannerImageUrl: business.bannerImageUrl,
-            subscriptions: [] // default subscription array if not available.
-         }));
+           // Removed Subscriptions for Google Maps businesses
+        }));
 
 
-       // Fetch results from Firestore
-         const querySnapshot = await getDocs(collection(db, 'businessListings'));
-         const firebaseBusinesses = [];
-       querySnapshot.forEach((doc) => {
-           const data = doc.data();
-          const subscriptions = (data.subscriptions || []).map(sub => ({
-              price: sub.price || 0,
-               billingCycle: sub.billingCycle || 'monthly',
+        const querySnapshot = await getDocs(collection(db, 'businessListings'));
+        const firebaseBusinesses = [];
+
+        for (const doc of querySnapshot.docs) {
+            const data = doc.data();
+            const subscriptions = (data.subscriptions || []).map(sub => ({
+                price: sub.price || 0,
+                billingCycle: sub.billingCycle || 'monthly',
                 paymentStatus: sub.paymentStatus || 'incomplete',
                 paymentDate: sub.paymentDate ? sub.paymentDate.toDate() : null,
 
-           }));
+            }));
+            const pamphlets = data.pamphlets || [];
+            const offers = data.offers || [];
 
-         firebaseBusinesses.push({ id: doc.id, ...data, source: 'Firebase', subscriptions: subscriptions });
-       });
+            firebaseBusinesses.push({ id: doc.id, ...data, source: 'Firebase', subscriptions: subscriptions, pamphlets: pamphlets, offers: offers });
+        };
 
-          // Filter Firebase results based on the provided query or category
-        let filteredFirebaseBusinesses = firebaseBusinesses.filter(business =>
+       let filteredFirebaseBusinesses = firebaseBusinesses.filter(business =>
            searchQuery ? (
              business.businessName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
              business.mainCategory?.toLowerCase().includes(searchQuery.toLowerCase()) ||
              business.subCategory?.toLowerCase().includes(searchQuery.toLowerCase()) ||
              business.availableServices?.toLowerCase().includes(searchQuery.toLowerCase())
+               ||  business.postalCode?.toLowerCase().includes(searchQuery.toLowerCase())
            ) : true
        );
-       // Calculate distance for Firebase businesses
-       if (coordinates) {
-         filteredFirebaseBusinesses = await Promise.all(filteredFirebaseBusinesses.map(async business => {
-           let lat = business.latitude;
-           let lng = business.longitude;
 
-           if ((lat == null || lng == null) && (business.streetAddress || business.city || business.postalCode)) {
-             const addressString = `${business.streetAddress ? business.streetAddress + ', ' : ''}${business.city ? business.city + ', ' : ''}${business.postalCode ? business.postalCode : ''}`;
-             const geoCode = await getLatLongFromArea(addressString);
-             if (geoCode && geoCode.latitude && geoCode.longitude) {
-               lat = geoCode.latitude;
-               lng = geoCode.longitude;
-             }
-           }
+        if (latitude && longitude) {
+            filteredFirebaseBusinesses = await Promise.all(filteredFirebaseBusinesses.map(async business => {
+                let lat = business.latitude;
+                let lng = business.longitude;
 
-           return {
-              businessName: business.businessName,
-                formatted_address: business.formatted_address,
-                 types: business.types,
-                placeId: business.placeId,
-                 phoneNumber: business.phoneNumber,
-                websiteUrl: business.websiteUrl,
-                 businessHours: business.businessHours,
-                 photos: business.photos,
-                 rating: business.rating,
-                user_ratings_total: business.user_ratings_total,
-               geometry: business.geometry,
-                  availableServices: business.availableServices,
-                mainCategory: business.mainCategory,
-               subCategory: business.subCategory,
-             completeAddress: business.completeAddress,
-             city: business.city,
-              state: business.state,
-               country: business.country,
-               source: business.source,
-               businessDescription : business.businessDescription,
-                 businessLogoUrl : business.businessLogoUrl,
-                contactPerson : business.contactPerson,
-                designation : business.designation,
-                 galleryImageUrls : business.galleryImageUrls,
-                postalCode : business.postalCode,
-             distance: calculateDistance(
-               parseFloat(coordinates.latitude),
-               parseFloat(coordinates.longitude),
-               lat,
-               lng
-             ),
-              latitude: lat,
-             longitude: lng,
-                openNow: business.openNow,
-               bannerImageUrl: business.bannerImageUrl,
-               subscriptions: business.subscriptions || []
-           };
-         }));
-         // Filter by distance
-         filteredFirebaseBusinesses = filteredFirebaseBusinesses.filter(business => {
-             return business.distance !== null
-         });
-       }
+                 if ((lat == null || lng == null) && (business.streetAddress || business.city || business.postalCode)) {
+                    const addressString = `${business.streetAddress ? business.streetAddress + ', ' : ''}${business.city ? business.city + ', ' : ''}${business.postalCode ? business.postalCode : ''}`;
+                   const geoCode = await getLatLongFromArea(addressString);
+                    if (geoCode && geoCode.latitude && geoCode.longitude) {
+                        lat = geoCode.latitude;
+                        lng = geoCode.longitude;
+                    }
+                }
 
+                 return {
+                   businessName: business.businessName,
+                    formatted_address: business.formatted_address,
+                    types: business.types,
+                    placeId: business.placeId,
+                    phoneNumber: business.phoneNumber,
+                    websiteUrl: business.websiteUrl,
+                    businessHours: business.businessHours,
+                    photos: business.photos,
+                    rating: business.rating,
+                    user_ratings_total: business.user_ratings_total,
+                    geometry: business.geometry,
+                    availableServices: business.availableServices,
+                    mainCategory: business.mainCategory,
+                    subCategory: business.subCategory,
+                    completeAddress: business.completeAddress,
+                    city: business.city,
+                    state: business.state,
+                    country: business.country,
+                   postalCode: business.postalCode,
+                    source: business.source,
+                    businessDescription : business.businessDescription,
+                    businessLogoUrl : business.businessLogoUrl,
+                    contactPerson : business.contactPerson,
+                    designation : business.designation,
+                    galleryImageUrls : business.galleryImageUrls,
+                    pamphlets: business.pamphlets,
+                    offers: business.offers,
+                    distance:  (latitude && longitude) ? calculateDistance(
+                        parseFloat(latitude),
+                        parseFloat(longitude),
+                        lat,
+                        lng
+                    ):null,
+                    latitude: lat,
+                    longitude: lng,
+                    openNow: business.openNow,
+                    bannerImageUrl: business.bannerImageUrl,
+                    subscriptions: business.subscriptions || []
+                };
+            }));
+             filteredFirebaseBusinesses = filteredFirebaseBusinesses.filter(business => {
+                return business.distance !== null
+            });
+        }
 
-         // Combine results, prioritize Firebase first
-         let businesses = filteredFirebaseBusinesses.length > 0
+        let businesses = filteredFirebaseBusinesses.length > 0
             ? [...filteredFirebaseBusinesses, ...allGoogleBusinesses]
             : [...allGoogleBusinesses];
 
-
-       // De-duplicate by placeId
-       const uniqueBusinesses = [];
-       const seenPlaceIds = new Set();
-       for (const business of businesses) {
+        const uniqueBusinesses = [];
+        const seenPlaceIds = new Set();
+         for (const business of businesses) {
            if (business.placeId) {
              if (!seenPlaceIds.has(business.placeId)) {
                uniqueBusinesses.push(business);
                seenPlaceIds.add(business.placeId);
             }
            } else {
-           uniqueBusinesses.push(business);
-          }
+             uniqueBusinesses.push(business);
+           }
        }
 
-         businesses = uniqueBusinesses;
+       businesses = uniqueBusinesses;
 
-
-       // Handle zero results
-        if (businesses.length === 0) {
-          return res.json({
-              results: [],
-              total: 0,
-            message: "No businesses found matching the search criteria.",
-          });
+       if (postalCode && !(latitude && longitude)) {
+            businesses = businesses.filter(business =>
+                business.postalCode && business.postalCode.toLowerCase() === postalCode.toLowerCase()
+            );
         }
 
-        if (minRating > 0) {
+
+         if (businesses.length === 0) {
+            return res.json({
+                results: [],
+                total: 0,
+                message: "No businesses found matching the search criteria.",
+            });
+        }
+         if (minRating > 0) {
           businesses = businesses.filter(business => (business.rating || 0) >= minRating);
         }
          if (openNow === 'true') {
@@ -283,75 +273,56 @@ const advancedSearch = async (req, res) => {
 
         if (businessStatus) {
           businesses = businesses.filter(business => business.businessStatus === businessStatus);
-       }
+        }
 
-        // Apply sorting
+
         switch (sortBy) {
-          case SORT_OPTIONS.DISTANCE:
-            businesses.sort((a, b) => {
-              if (a.distance === null && b.distance === null) return 0;
-              if (a.distance === null) return 1;
-              if (b.distance === null) return -1;
-              return ascending === 'true' ?
-                (a.distance - b.distance) :
-                (b.distance - a.distance);
-             });
-           break;
-          case SORT_OPTIONS.RATING:
-              businesses.sort((a, b) => ascending === 'true' ?
-               ((a.rating || 0) - (b.rating || 0)) :
-               ((b.rating || 0) - (a.rating || 0)));
-              break;
-          case SORT_OPTIONS.PRICE:
-            businesses.sort((a, b) => ascending === 'true' ?
-               ((a.priceLevel || 0) - (b.priceLevel || 0)) :
-              ((b.priceLevel || 0) - (a.priceLevel || 0)));
-             break;
-         case SORT_OPTIONS.NAME:
-           businesses.sort((a, b) => ascending === 'true' ?
-                (a.businessName || '').localeCompare(b.businessName || '') :
-                 (b.businessName || '').localeCompare(a.businessName || ''));
-               break;
-      }
+            case SORT_OPTIONS.DISTANCE:
+                businesses.sort((a, b) => {
+                    if (a.distance === null && b.distance === null) return 0;
+                    if (a.distance === null) return 1;
+                    if (b.distance === null) return -1;
+                    return ascending === 'true' ? (a.distance - b.distance) : (b.distance - a.distance);
+                });
+                break;
+            case SORT_OPTIONS.RATING:
+                businesses.sort((a, b) => ascending === 'true' ?
+                    ((a.rating || 0) - (b.rating || 0)) :
+                    ((b.rating || 0) - (a.rating || 0)));
+                break;
+            case SORT_OPTIONS.PRICE:
+                businesses.sort((a, b) => ascending === 'true' ?
+                    ((a.priceLevel || 0) - (b.priceLevel || 0)) :
+                    ((b.priceLevel || 0) - (a.priceLevel || 0)));
+                break;
+            case SORT_OPTIONS.NAME:
+                businesses.sort((a, b) => ascending === 'true' ?
+                    (a.businessName || '').localeCompare(b.businessName || '') :
+                    (b.businessName || '').localeCompare(a.businessName || ''));
+                break;
+        }
 
 
+        const total = businesses.length;
         const paginatedBusinesses = businesses.slice(startIndex, endIndex);
-           const hasMore =  businesses.length > endIndex;
+        const hasMore = businesses.length > (parseInt(offset) + parseInt(limit));
+
 
         // Format response
         const response = {
-             results: paginatedBusinesses,
-             total: businesses.length,
-              offset: parseInt(offset),
-             limit: parseInt(limit),
-              hasMore: hasMore
-            };
+            results: paginatedBusinesses,
+            total: total,
+            offset: parseInt(offset),
+            limit: parseInt(limit),
+            hasMore: hasMore
+        };
 
-         res.json(response);
-     } catch (error) {
+        res.json(response);
+    } catch (error) {
         console.error('Error in advanced search:', error);
         res.status(500).json({ error: 'Failed to fetch search results' });
     }
 };
-
-const getLatLongByPostalCode = async (req, res) => {
-   const { postalCode } = req.query;
-    if (!postalCode) {
-        return res.status(400).json({ error: 'Postal code is required' });
-    }
-    try {
-        const coordinates = await getLatLongFromPostalCode(postalCode);
-       if(coordinates.latitude && coordinates.longitude){
-           res.json(coordinates);
-       }else{
-           res.status(404).send({ error: "No data found for this postal code" });
-       }
-    } catch (error) {
-      console.error('Error fetching coordinates by postal code:', error);
-        res.status(500).json({ error: 'Failed to fetch coordinates' });
-    }
-};
-
 // Search by services
 const searchByServices = async (req, res) => {
     const { services, ...otherParams } = req.query;
@@ -386,16 +357,18 @@ export const getBusinessListings = async (req, res) => {
   try {
       const querySnapshot = await getDocs(collection(db, 'businessListings'));
     const listings = [];
-    querySnapshot.forEach((doc) => {
-      const data = doc.data();
-      const subscriptions = (data.subscriptions || []).map(sub => ({
-         price: sub.price || 0,
-           billingCycle: sub.billingCycle || 'monthly',
-            paymentStatus: sub.paymentStatus || 'incomplete',
-            paymentDate: sub.paymentDate ? sub.paymentDate.toDate() : null,
-      }));
-       listings.push({ id: doc.id, ...data, subscriptions: subscriptions });
-     });
+      for (const doc of querySnapshot.docs) {
+          const data = doc.data();
+          const subscriptions = (data.subscriptions || []).map(sub => ({
+              price: sub.price || 0,
+              billingCycle: sub.billingCycle || 'monthly',
+              paymentStatus: sub.paymentStatus || 'incomplete',
+              paymentDate: sub.paymentDate ? sub.paymentDate.toDate() : null,
+          }));
+          const pamphlets = data.pamphlets || [];
+          const offers = data.offers || [];
+          listings.push({ id: doc.id, ...data, subscriptions: subscriptions, pamphlets: pamphlets, offers: offers });
+      }
     res.json(listings);
   } catch (error) {
      console.error('Error fetching business listings:', error);
@@ -409,5 +382,4 @@ export default {
     searchByRating,
     searchNearby,
      getBusinessListings,
-     getLatLongByPostalCode,
 };
