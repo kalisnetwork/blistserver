@@ -8,22 +8,41 @@ import { googleMapsApiKey } from '../config.js';
 
 const advancedSearch = async (req, res) => {
   try {
-    const { latitude, longitude, minRating = 0, businessStatus, sortBy = SORT_OPTIONS.DISTANCE, ascending = 'true', limit = 20, offset = 0, includeDetails = 'false', query, category, openNow, ...otherParams } = req.query;
+    const { 
+      latitude, 
+      longitude, 
+      minRating = 0, 
+      businessStatus, 
+      sortBy = SORT_OPTIONS.DISTANCE, 
+      ascending = 'true', 
+      limit = 20, 
+      offset = 0, 
+      includeDetails = 'false', 
+      query,
+      category,
+      openNow,
+      area,
+      postalCode,
+      ...otherParams 
+    } = req.query;
+
     let coordinates = null;
-    if (!query && !category && (!latitude || !longitude)) {
-      if (otherParams.area) {
-        coordinates = await getLatLongFromArea(otherParams.area);
-      } else if (otherParams.postalCode) {
-        coordinates = await getLatLongFromPostalCode(otherParams.postalCode);
+    // Check for coordinates from different sources
+    if (!latitude || !longitude) {
+      if (area) {
+        coordinates = await getLatLongFromArea(area);
+      } else if (postalCode) {
+        coordinates = await getLatLongFromPostalCode(postalCode);
       }
-    } else if (latitude && longitude) {
+    } else {
       coordinates = { latitude, longitude };
     }
-    if (!query && !category && !coordinates) {
-      return res.status(400).json({ error: "Coordinates, query, or category are required" });
+
+    if (!coordinates && !query) {
+      return res.status(400).json({ error: "Location (coordinates, area, or postal code) or query is required" });
     }
 
-    let searchQuery;
+    let searchQuery = '';
     const radii = [500, 1000, 1500, 2000, 2500, 3000];
     let allGoogleBusinesses = [];
     const startIndex = parseInt(offset);
@@ -33,25 +52,38 @@ const advancedSearch = async (req, res) => {
       currentRadiusIndex = Math.floor(startIndex / parseInt(limit));
     }
 
+    // Build the search query
     let baseUrl = 'https://maps.googleapis.com/maps/api/place/textsearch/json?';
-    if (query) {
+    
+    if (query && category) {
+      // Combine both query and category
+      searchQuery = `${query} ${category}`;
+    } else if (query) {
       searchQuery = query;
     } else if (category) {
       searchQuery = category;
     } else {
       searchQuery = 'pharmacy|hospital|doctor|convenience_store|grocery_or_supermarket|bakery|restaurant|cafe|hardware_store|electrician|gym|car_repair|bicycle_store|mechanic';
     }
+
     baseUrl += `query=${encodeURIComponent(searchQuery)}`;
+
+    // Add location bias if coordinates are available
     if (coordinates) {
       baseUrl += `&location=${coordinates.latitude},${coordinates.longitude}`;
       baseUrl += `&locationbias=circle:${5000}@${coordinates.latitude},${coordinates.longitude}`;
     }
+
+    // Add type if category is mapped
     if (category && categoryToGooglePlacesMapping[category]) {
       baseUrl += `&type=${categoryToGooglePlacesMapping[category].type}`;
     }
+
     baseUrl += `&key=${googleMapsApiKey}`;
 
-    let apiCallCount = 0; // Track the number of API calls
+    // Rest of your existing code remains the same...
+    
+    let apiCallCount = 0;
 
     if (coordinates) {
       for (let i = 0; i <= currentRadiusIndex; i++) {
