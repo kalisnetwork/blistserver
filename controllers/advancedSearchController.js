@@ -38,8 +38,8 @@ const advancedSearch = async (req, res) => {
       coordinates = { latitude, longitude };
     }
 
-    if (!coordinates && !query) {
-      return res.status(400).json({ error: "Location (coordinates, area, or postal code) or query is required" });
+    if (!coordinates && !query && !category) {
+      return res.status(400).json({ error: "Location (coordinates, area, or postal code), query, or category is required" });
     }
 
     let searchQuery = '';
@@ -81,8 +81,6 @@ const advancedSearch = async (req, res) => {
 
     baseUrl += `&key=${googleMapsApiKey}`;
 
-    // Rest of your existing code remains the same...
-    
     let apiCallCount = 0;
 
     if (coordinates) {
@@ -104,8 +102,11 @@ const advancedSearch = async (req, res) => {
     console.log(`Total API calls made: ${apiCallCount}`);
     console.log(`Total businesses found: ${allGoogleBusinesses.length}`);
 
-    allGoogleBusinesses = allGoogleBusinesses?.map(business => createBusinessObject(business, 'Google Maps', coordinates));
+    allGoogleBusinesses = allGoogleBusinesses?.map(business => 
+      createBusinessObject(business, 'Google Maps', coordinates)
+    );
 
+    // Fetch Firebase businesses
     const querySnapshot = await getDocs(collection(db, 'businessListings'));
     const firebaseBusinesses = [];
     for (const doc of querySnapshot.docs) {
@@ -123,13 +124,18 @@ const advancedSearch = async (req, res) => {
       });
     }
 
-    let filteredFirebaseBusinesses = firebaseBusinesses.filter(business => searchQuery ? (
-      business.businessName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      business.mainCategory?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      business.subCategory?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      business.availableServices?.toLowerCase().includes(searchQuery.toLowerCase())
-    ) : true);
+    // Filter Firebase businesses based on search criteria
+    let filteredFirebaseBusinesses = firebaseBusinesses.filter(business => {
+      const searchTerms = searchQuery.toLowerCase();
+      return (
+        business.businessName?.toLowerCase().includes(searchTerms) ||
+        business.mainCategory?.toLowerCase().includes(searchTerms) ||
+        business.subCategory?.toLowerCase().includes(searchTerms) ||
+        business.availableServices?.toLowerCase().includes(searchTerms)
+      );
+    });
 
+    // Calculate distances for Firebase businesses if coordinates are available
     if (coordinates) {
       filteredFirebaseBusinesses = await Promise.all(filteredFirebaseBusinesses.map(async business => {
         let lat = business.latitude;
@@ -155,9 +161,12 @@ const advancedSearch = async (req, res) => {
         }, 'Firebase', coordinates);
       }));
 
-      filteredFirebaseBusinesses = filteredFirebaseBusinesses.filter(business => business.distance !== null);
+      filteredFirebaseBusinesses = filteredFirebaseBusinesses.filter(business => 
+        business.distance !== null
+      );
     }
 
+    // Combine and deduplicate businesses
     let businesses = [...filteredFirebaseBusinesses, ...allGoogleBusinesses];
     const uniqueBusinesses = [];
     const seenPlaceIds = new Set();
@@ -177,9 +186,14 @@ const advancedSearch = async (req, res) => {
     console.log(`Total combined businesses: ${businesses.length}`);
 
     if (businesses.length === 0) {
-      return res.json({ results: [], total: 0, message: "No businesses found matching the search criteria." });
+      return res.json({ 
+        results: [], 
+        total: 0, 
+        message: "No businesses found matching the search criteria." 
+      });
     }
 
+    // Apply filters
     if (minRating > 0) {
       businesses = businesses.filter(business => (business.rating || 0) >= minRating);
     }
@@ -192,6 +206,7 @@ const advancedSearch = async (req, res) => {
       businesses = businesses.filter(business => business.businessStatus === businessStatus);
     }
 
+    // Sort businesses
     switch (sortBy) {
       case SORT_OPTIONS.DISTANCE:
         businesses.sort((a, b) => {
@@ -204,12 +219,12 @@ const advancedSearch = async (req, res) => {
       case SORT_OPTIONS.RATING:
         businesses.sort((a, b) => ascending === 'true' ?
           ((a.rating || 0) - (b.rating || 0)) :
-           ((b.rating || 0) - (a.rating || 0)));
+          ((b.rating || 0) - (a.rating || 0)));
         break;
       case SORT_OPTIONS.PRICE:
         businesses.sort((a, b) => ascending === 'true' ?
           ((a.priceLevel || 0) - (b.priceLevel || 0)) :
-           ((b.priceLevel || 0) - (a.priceLevel || 0)));
+          ((b.priceLevel || 0) - (a.priceLevel || 0)));
         break;
       case SORT_OPTIONS.NAME:
         businesses.sort((a, b) => ascending === 'true' ?
@@ -218,6 +233,7 @@ const advancedSearch = async (req, res) => {
         break;
     }
 
+    // Paginate results
     const paginatedBusinesses = businesses.slice(startIndex, endIndex);
 
     console.log(`Returning businesses ${startIndex} to ${endIndex}`);
@@ -237,4 +253,3 @@ const advancedSearch = async (req, res) => {
 };
 
 export default advancedSearch;
-
