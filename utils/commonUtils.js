@@ -2,12 +2,14 @@ import { fetchBusinesses } from './apiUtils.js';
 import { calculateDistance } from './apiUtils.js';
 
 // Helper function to map Subscription data
-export const mapSubscriptionData = (sub) => ({
-  price: sub.price || 0,
-  billingCycle: sub.billingCycle || 'monthly',
-  paymentStatus: sub.paymentStatus || 'incomplete',
-  paymentDate: sub.paymentDate ? sub.paymentDate.toDate() : null,
-});
+export const mapSubscriptionData = (sub) => {
+  return {
+    ...sub,
+    paymentDate: sub.paymentDate instanceof String || typeof sub.paymentDate === 'string' 
+      ? new Date(sub.paymentDate)
+      : sub.paymentDate.toDate?.() || sub.paymentDate
+  };
+};
 
 // Base business structure
 export const createBusinessObject = (business, source, coordinates = null) => ({
